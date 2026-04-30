@@ -1,12 +1,15 @@
 # Helix Relay — Docker build for interop testing
-# Build context: pbs-stack parent directory
-# Build: from docker-compose.test.yml (context: ..)
+# Build context: pbs-stack/
+# Build: docker compose -f docker-compose.test.yml build
 FROM rust:1.91-bookworm AS builder
 WORKDIR /src
 
 # Copy helix source and ws-wire
 COPY helix/ ./helix/
-COPY pbs-stack/ws-wire/ ./pbs-stack/ws-wire/
+COPY ws-wire/ ./ws-wire/
+
+# Fix ws-wire path — inside Docker, ws-wire is at ../../../ws-wire (sibling to helix/)
+RUN sed -i 's|path = "../../../pbs-stack/ws-wire"|path = "../../../ws-wire"|g' helix/crates/relay/Cargo.toml
 
 # Build in helix workspace
 WORKDIR /src/helix
