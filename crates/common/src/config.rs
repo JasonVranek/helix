@@ -54,6 +54,7 @@ pub struct RelayConfig {
     /// Enable debug API endpoints (/debug/*) — only for local testing.
     #[serde(default)]
     pub debug_api: bool,
+    #[serde(default)]
     is_local_dev: bool,
     /// Cores configuration, recommended to be set for production use
     pub cores: CoresConfig,
