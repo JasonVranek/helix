@@ -51,7 +51,9 @@ pub struct RelayConfig {
     pub inclusion_list: Option<InclusionListConfig>,
     pub is_submission_instance: bool,
     pub is_registration_instance: bool,
+    /// Enable debug API endpoints (/debug/*) — only for local testing.
     #[serde(default)]
+    pub debug_api: bool,
     is_local_dev: bool,
     /// Cores configuration, recommended to be set for production use
     pub cores: CoresConfig,
@@ -91,6 +93,7 @@ impl RelayConfig {
             inclusion_list: Default::default(),
             is_submission_instance: Default::default(),
             is_registration_instance: Default::default(),
+            debug_api: false,
             is_local_dev: Default::default(),
             cores: CoresConfig {
                 auctioneer: 1,

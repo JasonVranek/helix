@@ -59,7 +59,7 @@ struct ToggleWsRequest {
     enabled: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct WsRegistrationsResponse {
     count: u64,
 }
