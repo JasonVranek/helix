@@ -28,6 +28,7 @@ pub(crate) const API_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn start_api_service<A: Api>(
     config: RelayConfig,
+    debug_api: bool,
     db: Arc<PostgresDatabaseService>,
     local_cache: Arc<LocalCache>,
     current_slot_info: CurrentSlotInfo,
@@ -45,6 +46,7 @@ pub fn start_api_service<A: Api>(
 ) {
     tokio::spawn(run_api_service::<A>(
         config.clone(),
+        debug_api,
         db.clone(),
         local_cache.clone(),
         current_slot_info,
@@ -64,6 +66,7 @@ pub fn start_api_service<A: Api>(
 
 pub async fn run_api_service<A: Api>(
     mut config: RelayConfig,
+    debug_api: bool,
     db: Arc<PostgresDatabaseService>,
     local_cache: Arc<LocalCache>,
     current_slot_info: CurrentSlotInfo,
@@ -140,10 +143,14 @@ pub async fn run_api_service<A: Api>(
     let delivered_payloads_cache_v2: DeliveredPayloadsCacheV2 =
         Cache::builder().time_to_idle(Duration::from_secs(12)).max_capacity(10_000).build();
 
+    let debug_state = Arc::new(crate::api::debug::DebugState::new(top_bid_tx.clone()));
+
     let router = build_router(
+        debug_api,
         &mut config.router_config,
         builder_api,
         proposer_api,
+        debug_state,
         data_api,
         relay_network_api,
         bids_cache,

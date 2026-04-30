@@ -47,6 +47,7 @@ impl Api for ApiProd {
 
 fn main() {
     let config = load_config();
+    let start_config = helix_common::config::StartConfig::parse();
     init_runtime(&config);
 
     let keypair = load_keypair();
@@ -145,6 +146,7 @@ async fn run(instance_id: String, config: RelayConfig, keypair: BlsKeypair) -> e
 
         start_api_service::<ApiProd>(
             config.clone(),
+            start_config.debug_api,
             db.clone(),
             local_cache.clone(),
             current_slot_info,

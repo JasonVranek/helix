@@ -381,6 +381,10 @@ impl LoggingConfig {
 pub struct StartConfig {
     #[clap(long, default_value = "config.yml")]
     pub config: String,
+
+    /// Enable debug API endpoints (/debug/*)
+    #[clap(long, default_value_t = false)]
+    pub debug_api: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

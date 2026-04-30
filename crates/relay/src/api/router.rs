@@ -37,9 +37,11 @@ pub struct Terminating(pub Arc<AtomicBool>);
 pub struct KnownValidatorsLoaded(pub Arc<AtomicBool>);
 
 pub fn build_router<A: Api>(
+    debug_api: bool,
     router_config: &mut RouterConfig,
     builder_api: Arc<BuilderApi<A>>,
     proposer_api: Arc<ProposerApi<A>>,
+    debug_state: Arc<crate::api::debug::DebugState>,
     data_api: Arc<DataApi>,
     relay_network_api: RelayNetworkApi,
     bids_cache: BidsCache,
@@ -147,6 +149,11 @@ pub fn build_router<A: Api>(
         .layer(Extension(delivered_payloads_cache_v2))
         .layer(Extension(KnownValidatorsLoaded(known_validators_loaded)))
         .layer(Extension(Terminating(terminating)));
+
+    // Mount debug endpoints when --debug-api is set
+    if debug_api {
+        router = crate::api::debug::mount(router, debug_state);
+    }
 
     router
 }
