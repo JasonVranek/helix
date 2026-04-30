@@ -87,3 +87,5 @@ pub async fn status(
 }
 
 const CONSENSUS_VERSION_HEADER: &str = "Eth-Consensus-Version";
+
+pub mod websocket;
