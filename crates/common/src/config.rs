@@ -427,6 +427,7 @@ impl RouterConfig {
             Route::GetHeader,
             Route::GetPayload,
             Route::GetPayloadV2,
+            Route::WebSocket,
         ]);
 
         self.replace_condensed_with_real(Route::DataApi, &[
@@ -544,6 +545,7 @@ pub enum Route {
     ValidatorRegistration,
     GetInclusionList,
     RelayNetwork,
+    WebSocket,
     DataAdjustments,
     MergedBlocks,
 }
@@ -581,6 +583,7 @@ impl Route {
             Route::ProposerApi => panic!("ProposerApi is not a real route"),
             Route::DataApi => panic!("DataApi is not a real route"),
             Route::RelayNetwork => PATH_RELAY_NETWORK.to_string(),
+            Route::WebSocket => PATH_WEBSOCKET.to_string(),
         }
     }
 }

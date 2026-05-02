@@ -23,6 +23,7 @@ use crate::{
     housekeeper::CurrentSlotInfo,
     network::api::RelayNetworkApi,
 };
+use crate::api::proposer::websocket::push::WsProposerRegistry;
 
 pub(crate) const API_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -87,7 +88,32 @@ pub async fn run_api_service<A: Api>(
 
     let validator_preferences = Arc::new(config.validator_preferences.clone());
 
+    let ws_proposer_registry = Arc::new(WsProposerRegistry::default());
+
     let debug_state = Arc::new(crate::api::debug::DebugState::new(top_bid_tx.clone()));
+
+    // Keep the WS push service alive — if shutdown_tx is dropped, the
+    // watch channel fires and the task exits immediately.
+    let mut _shutdown_txs: Vec<tokio::sync::watch::Sender<bool>> = Vec::new();
+    {
+        let push_registry = ws_proposer_registry.clone();
+        let push_slot_info = current_slot_info.clone();
+        let push_auctioneer = auctioneer_handle.clone();
+        let push_signing = relay_signing_context.clone();
+        let top_bid_rx = top_bid_tx.subscribe();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        _shutdown_txs.push(shutdown_tx);
+        tokio::spawn(async move {
+            crate::api::proposer::websocket::push::run(
+                push_registry,
+                push_slot_info,
+                push_auctioneer,
+                push_signing,
+                top_bid_rx,
+                shutdown_rx,
+            ).await;
+        });
+    }
 
     let (gossip_sender, gossip_receiver) = tokio::sync::mpsc::channel(10_000);
 
@@ -156,6 +182,7 @@ pub async fn run_api_service<A: Api>(
         delivered_payloads_cache_v2,
         known_validators_loaded,
         terminating,
+        ws_proposer_registry.clone(),
     );
 
     let listener =

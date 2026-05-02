@@ -25,11 +25,12 @@ use crate::{
         Api, BidsCache, BidsCacheV2, DataApi, DeliveredPayloadsCache, DeliveredPayloadsCacheV2,
         builder::api::BuilderApi,
         middleware::body_limit_middleware,
-        proposer::{self, ProposerApi},
+        proposer::{self, ProposerApi, websocket},
         service::API_REQUEST_TIMEOUT,
     },
     network::api::RelayNetworkApi,
 };
+use proposer::websocket::push::WsProposerRegistry;
 
 #[derive(Clone)]
 pub struct Terminating(pub Arc<AtomicBool>);
@@ -50,6 +51,7 @@ pub fn build_router<A: Api>(
     delivered_payloads_cache_v2: DeliveredPayloadsCacheV2,
     known_validators_loaded: Arc<AtomicBool>,
     terminating: Arc<AtomicBool>,
+    ws_proposer_registry: Arc<WsProposerRegistry>,
 ) -> Router {
     router_config.resolve_condensed_routes();
 
@@ -81,6 +83,7 @@ pub fn build_router<A: Api>(
             Route::DataAdjustments => get(DataApi::data_adjustments),
             Route::MergedBlocks => get(DataApi::merged_blocks),
             Route::RelayNetwork => any(RelayNetworkApi::connect),
+            Route::WebSocket => get(websocket::connect_ws::<A>),
             Route::All | Route::BuilderApi | Route::ProposerApi | Route::DataApi => {
                 panic!(
                     "Route not implemented: {:?}, please add handling if there are new routes or resolve condensed routes before!",
@@ -148,7 +151,8 @@ pub fn build_router<A: Api>(
         .layer(Extension(delivered_payloads_cache))
         .layer(Extension(delivered_payloads_cache_v2))
         .layer(Extension(KnownValidatorsLoaded(known_validators_loaded)))
-        .layer(Extension(Terminating(terminating)));
+        .layer(Extension(Terminating(terminating)))
+        .layer(Extension(ws_proposer_registry));
 
     // Mount debug endpoints when --debug-api is set
     if debug_api {

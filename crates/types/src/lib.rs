@@ -72,8 +72,17 @@ pub type GetHeaderResponse = lh_types::ForkVersionedResponse<SignedBuilderBid>;
 /// Request object of POST `/eth/v1/builder/blinded_blocks`
 pub type SignedBlindedBeaconBlock =
     lh_types::signed_beacon_block::SignedBlindedBeaconBlock<MainnetEthSpec>; // TODO: maybe re implement this to avoid trait
+/// Concrete fork variant for Fulu blinded blocks.
 pub type SignedBlindedBeaconBlockFulu =
     lh_types::signed_beacon_block::SignedBeaconBlockFulu<MainnetEthSpec, BlindedPayload>;
+/// Concrete fork variant for Electra blinded blocks. Identical SSZ layout to
+/// Fulu except without the execution-requests field; used by the WS submit
+/// handler and any code needing an Electra-specific concrete type.
+pub type SignedBlindedBeaconBlockElectra =
+    lh_types::signed_beacon_block::SignedBeaconBlockElectra<MainnetEthSpec, BlindedPayload>;
+/// Concrete fork variant for Gloas blinded blocks.
+pub type SignedBlindedBeaconBlockGloas =
+    lh_types::signed_beacon_block::SignedBeaconBlockGloas<MainnetEthSpec, BlindedPayload>;
 pub type BlindedPayload = lh_types::payload::BlindedPayload<MainnetEthSpec>;
 pub type BlindedPayloadRef<'a> = lh_types::payload::BlindedPayloadRef<'a, MainnetEthSpec>;
 
