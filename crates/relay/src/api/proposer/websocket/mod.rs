@@ -26,7 +26,7 @@ use axum::{
     response::IntoResponse,
 };
 use futures::StreamExt;
-use helix_common::utils::{utcnow_ns, utcnow_sec};
+use helix_common::utils::utcnow_sec;
 use helix_types::{BlsPublicKeyBytes, ForkName, SignedBlindedBeaconBlock, SignedBlindedBeaconBlockElectra, SignedBlindedBeaconBlockFulu, SignedBlindedBeaconBlockGloas};
 use parking_lot::Mutex;
 use serde::Deserialize;
@@ -105,7 +105,7 @@ async fn handle_connection<A: Api>(
     auction_conclusion_ms: Option<u64>,
 ) {
     let connection_id = registry.allocate_connection_id();
-    info!(connection_id, ?auction_conclusion_ms, now_ns = utcnow_ns(), "WS: new connection");
+    info!(connection_id, ?auction_conclusion_ms, "WS: new connection");
 
     // Outbound push channel for this connection. push::run sends
     // (fork_byte, ssz_bytes) payloads; the handler prepends the tag byte
@@ -157,7 +157,7 @@ async fn handle_connection<A: Api>(
                 let data = match msg {
                     Some(Ok(Message::Binary(d))) => d,
                     Some(Ok(Message::Close(_))) | None => {
-                        info!(connection_id, now_ns = utcnow_ns(), "WS: connection closed");
+                        info!(connection_id, "WS: connection closed");
                         break;
                     }
                     Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
@@ -171,7 +171,7 @@ async fn handle_connection<A: Api>(
                 let decoded = match framing::decode(&data) {
                     Ok(d) => d,
                     Err(e) => {
-                        warn!(connection_id, ?e, now_ns = utcnow_ns(), "WS: decode error — closing");
+                        warn!(connection_id, ?e, "WS: decode error — closing");
                         break;
                     }
                 };
@@ -195,7 +195,6 @@ async fn handle_connection<A: Api>(
                         }
                         info!(
                             connection_id,
-                            now_ns = utcnow_ns(),
                             total = batch.registrations.len(),
                             accepted,
                             rejected,
@@ -404,7 +403,7 @@ async fn route_submit_blinded_block<A: Api>(
             SubmitStatus::Rejected
         }
         Err(e) => {
-            warn!(?e, now_ns = utcnow_ns(), "WS submit: _get_payload returned error");
+            warn!(?e, "WS submit: _get_payload returned error");
             SubmitStatus::InternalError
         }
     }
