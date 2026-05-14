@@ -2,48 +2,38 @@
 //! API WebSocket extension.
 //!
 //! ARCH v3.2 §2.3 / §5: Electra=1, Fulu=2, Gloas=3. Pre-Electra forks and
-//! wire byte 0 are invalid. This mapping MUST match commit-boost's
-//! `commit-boost-client/crates/pbs/src/mev_boost/wire.rs` exactly.
+//! wire byte 0 are invalid. Fork encoding is delegated to ws_wire::framing.
 
 use alloy_primitives::Address;
 use helix_types::{
     BlsPublicKeyBytes, BlsSignatureBytes, ForkName, SignedValidatorRegistrationData,
 };
+use ws_wire::WireError;
 use ws_wire::messages::SignedValidatorRegistrationV1;
 #[cfg(test)]
-use ws_wire::messages::ValidatorRegistrationData as WireVrd;
+use ws_wire::messages::SubscriptionRequest as WireVrd;
 
 // ---------------------------------------------------------------------------
-// Errors
+// Fork name <-> u8 (thin adapters delegating to ws_wire)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, thiserror::Error)]
-pub enum WireForkError {
-    #[error("pre-Electra fork not supported on the WebSocket wire: {0:?}")]
-    UnsupportedFork(ForkName),
-    #[error("unknown wire fork discriminant: {0}")]
-    UnknownDiscriminant(u8),
+pub fn fork_name_to_u8(fork: ForkName) -> Result<u8, WireError> {
+    use ForkName::*;
+    let name = match fork {
+        Electra => "electra",
+        Fulu => "fulu",
+        Gloas => "gloas",
+        _other => return Err(WireError::InvalidForkByte(0)),
+    };
+    ws_wire::framing::fork_name_to_u8(name)
 }
 
-// ---------------------------------------------------------------------------
-// Fork name <-> u8
-// ---------------------------------------------------------------------------
-
-pub fn fork_name_to_u8(fork: ForkName) -> Result<u8, WireForkError> {
-    match fork {
-        ForkName::Electra => Ok(1),
-        ForkName::Fulu => Ok(2),
-        ForkName::Gloas => Ok(3),
-        other => Err(WireForkError::UnsupportedFork(other)),
-    }
-}
-
-pub fn fork_name_from_u8(v: u8) -> Result<ForkName, WireForkError> {
-    match v {
-        1 => Ok(ForkName::Electra),
-        2 => Ok(ForkName::Fulu),
-        3 => Ok(ForkName::Gloas),
-        other => Err(WireForkError::UnknownDiscriminant(other)),
+pub fn fork_name_from_u8(v: u8) -> Result<ForkName, WireError> {
+    match ws_wire::framing::fork_name_from_u8(v)? {
+        "electra" => Ok(ForkName::Electra),
+        "fulu" => Ok(ForkName::Fulu),
+        "gloas" => Ok(ForkName::Gloas),
+        _ => unreachable!("ws_wire only returns known fork names"),
     }
 }
 

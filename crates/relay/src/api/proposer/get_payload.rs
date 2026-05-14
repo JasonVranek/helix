@@ -170,6 +170,33 @@ impl<A: Api> ProposerApi<A> {
                     Ok(response)
                 }
             },
+            Err(ProposerApiError::DeliveringPayload) => {
+                // Already delivering — serve from cache (WS path triggered
+                // delivery first). V1 callers expect the payload body, not
+                // a bare 202.
+                if let Some(payload) = proposer_api
+                    .delivered_payloads
+                    .get(&(slot.as_u64(), block_hash))
+                {
+                    let response = payload.clone();
+                    match response_encoding {
+                        Encoding::Json => Ok(axum::Json(response).into_response()),
+                        Encoding::Ssz => {
+                            let mut r = response.data.as_ssz_bytes().into_response();
+                            let h = r.headers_mut();
+                            h.insert(CONTENT_TYPE, HeaderValue::from_str(HEADER_SSZ).unwrap());
+                            h.insert(
+                                CONSENSUS_VERSION_HEADER,
+                                HeaderValue::from_str(&fork.to_string()).unwrap(),
+                            );
+                            Ok(r)
+                        }
+                    }
+                } else {
+                    // Shouldn't happen: DeliveringPayload but no cache.
+                    Ok(StatusCode::ACCEPTED.into_response())
+                }
+            }
             Err(err) => {
                 proposer_api.db.save_failed_get_payload(
                     slot.into(),
@@ -223,6 +250,9 @@ impl<A: Api> ProposerApi<A> {
             .await
         {
             Ok(_) => Ok(StatusCode::ACCEPTED),
+            // Already delivering = already accepted (submitBlindedBlockV2 spec: return 202).
+            // Happens when WS SubmitBlindedBlock and REST submit_block arrive concurrently.
+            Err(ProposerApiError::DeliveringPayload) => Ok(StatusCode::ACCEPTED),
             Err(err) => {
                 proposer_api.db.save_failed_get_payload(
                     slot.into(),
@@ -388,6 +418,11 @@ impl<A: Api> ProposerApi<A> {
                 sleep(Duration::from_millis(remaining_sleep_ms)).await;
             }
         }
+
+        // Cache for idempotent V1 retry — when a second caller (REST V1
+        // fallback) hits DeliveringPayload, serve from cache instead of
+        // returning 202 (which V1 callers interpret as error).
+        self.delivered_payloads.insert((slot.as_u64(), block_hash), to_proposer.clone());
 
         // Return response
         info!(?trace, timestamp = utcnow_ns(), "delivering payload");

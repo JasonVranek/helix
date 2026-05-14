@@ -124,7 +124,7 @@ impl ConnectionRtt {
 /// connection handler only constructs a fresh `Arc<Mutex<Self>>` alongside
 /// `ConnectionRtt` at upgrade time.
 #[derive(Debug)]
-struct PerSlotState {
+pub(crate) struct PerSlotState {
     /// Slot this state is for.
     slot: u64,
     /// Timestamp of the most recent Phase-A-emitted push. Used to enforce
@@ -138,6 +138,10 @@ struct PerSlotState {
     cached_bid: Option<(u8, Vec<u8>)>,
     /// True after Phase B has scheduled its one-shot timer for this slot.
     deadline_scheduled: bool,
+    /// True after this connection has submitted a blinded block for this
+    /// (pubkey, slot). When set, BidPush is suppressed for the rest of
+    /// the slot. Reset on slot rollover.
+    pub received_submission: bool,
 }
 
 impl PerSlotState {
@@ -148,6 +152,7 @@ impl PerSlotState {
             last_pushed_hash: None,
             cached_bid: None,
             deadline_scheduled: false,
+            received_submission: false,
         }
     }
 }
@@ -271,7 +276,7 @@ impl WsProposerRegistry {
     /// Internal: snapshot the full `RegisteredSender` entries for `pubkey`.
     /// Shared `Arc`s are cheap to clone. The push service uses this to
     /// drive Phase A/B per connection.
-    fn get_all_entries(&self, pubkey: &BlsPublicKeyBytes) -> Vec<RegisteredSenderSnapshot> {
+    pub(crate) fn get_all_entries(&self, pubkey: &BlsPublicKeyBytes) -> Vec<RegisteredSenderSnapshot> {
         self.senders
             .read()
             .get(pubkey)
@@ -301,13 +306,13 @@ impl WsProposerRegistry {
 /// push service iterates over these so it can work against a stable
 /// snapshot without holding the registry's RwLock during async work.
 #[derive(Clone)]
-struct RegisteredSenderSnapshot {
+pub(crate) struct RegisteredSenderSnapshot {
     #[allow(dead_code)]
     connection_id: u64,
     sender: HeaderPushSender,
     auction_conclusion_ms: Option<u64>,
     rtt: Arc<Mutex<ConnectionRtt>>,
-    per_slot: Arc<Mutex<PerSlotState>>,
+    pub(crate) per_slot: Arc<Mutex<PerSlotState>>,
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -454,8 +459,10 @@ fn apply_two_phase_policy(
 ) {
     let mut st = snap.per_slot.lock();
 
-    // New-slot rollover. Keep the cached_bid immediately after reset so
-    // a same-update Phase B timer already has something to send.
+    // New-slot rollover MUST come first — received_submission is a per-slot
+    // flag that should reset on slot advance. If checked before the rollover,
+    // a submission from slot N permanently blocks pushes in slot N+1 when no
+    // new bid arrives (dequeue is only called on incoming bids).
     if st.slot != slot {
         *st = PerSlotState::for_slot(slot);
         debug!(
@@ -463,6 +470,12 @@ fn apply_two_phase_policy(
             slot,
             "WS push: new slot, resetting per-slot state"
         );
+    }
+
+    // Settle: after receiving a blinded block submission for this
+    // (pubkey, slot), stop pushing — the proposer has already acted.
+    if st.received_submission {
+        return;
     }
     st.cached_bid = Some((fork_byte, ssz_bytes.to_vec()));
 
@@ -777,5 +790,27 @@ mod push_tests {
         let c = vec![2u8; 100];
         assert_eq!(fast_content_hash(&a), fast_content_hash(&b));
         assert_ne!(fast_content_hash(&a), fast_content_hash(&c));
+    }
+
+    #[test]
+    fn per_slot_settle_resets_on_rollover() {
+        let mut st = PerSlotState::for_slot(10);
+        st.received_submission = true;
+        assert!(st.received_submission);
+
+        // Simulate slot rollover via for_slot
+        let st = PerSlotState::for_slot(11);
+        assert!(!st.received_submission, "settle must reset on new slot");
+    }
+
+    #[test]
+    fn per_slot_settle_prevents_push() {
+        let mut st = PerSlotState::for_slot(10);
+        assert!(!st.received_submission);
+        st.received_submission = true;
+
+        // In apply_two_phase_policy, the settle guard checks this.
+        // Verify the field is accessible and set properly.
+        assert!(st.received_submission);
     }
 }

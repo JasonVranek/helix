@@ -1,11 +1,12 @@
 #[cfg(test)]
 mod wire_tests {
-    use super::super::wire::{self, WireForkError};
+    use super::super::wire as wire;
     use alloy_primitives::Address;
     use helix_types::{
         BlsPublicKeyBytes, BlsSignatureBytes, ForkName, SignedValidatorRegistrationData,
         ValidatorRegistrationData,
     };
+    use ws_wire::WireError;
 
     fn gen_native_signed_vr() -> SignedValidatorRegistrationData {
         SignedValidatorRegistrationData {
@@ -36,7 +37,7 @@ mod wire_tests {
             ForkName::Deneb,
         ] {
             assert!(
-                matches!(wire::fork_name_to_u8(fork), Err(WireForkError::UnsupportedFork(_))),
+                matches!(wire::fork_name_to_u8(fork), Err(WireError::InvalidForkByte(_))),
                 "pre-Electra fork {fork:?} must be rejected"
             );
         }
@@ -55,7 +56,7 @@ mod wire_tests {
     fn fork_name_from_u8_zero_rejected() {
         assert!(matches!(
             wire::fork_name_from_u8(0),
-            Err(WireForkError::UnknownDiscriminant(0))
+            Err(WireError::InvalidForkByte(0))
         ));
     }
 
@@ -65,7 +66,7 @@ mod wire_tests {
             assert!(
                 matches!(
                     wire::fork_name_from_u8(b),
-                    Err(WireForkError::UnknownDiscriminant(_))
+                    Err(WireError::InvalidForkByte(_))
                 ),
                 "byte {b} must be rejected"
             );

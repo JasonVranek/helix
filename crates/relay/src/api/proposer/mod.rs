@@ -6,6 +6,7 @@ mod types;
 
 use std::sync::{Arc, atomic::Ordering};
 
+use alloy_primitives::B256;
 use axum::{Extension, response::IntoResponse};
 pub use error::*;
 use helix_common::{
@@ -13,6 +14,7 @@ use helix_common::{
     local_cache::LocalCache, signing::RelaySigningContext,
 };
 use helix_database::handle::DbHandle;
+use helix_types::GetPayloadResponse;
 use hyper::StatusCode;
 pub use types::*;
 
@@ -40,6 +42,10 @@ pub struct ProposerApi<A: Api> {
     pub alert_manager: AlertManager,
     pub auctioneer_handle: AuctioneerHandle,
     pub reg_handle: RegWorkerHandle,
+    /// Cache of delivered payloads for idempotent V1 retry.
+    /// V1 submitBlindedBlock returns the unblinded payload body; when a
+    /// second caller hits `DeliveringPayload`, we serve from here instead.
+    pub delivered_payloads: Arc<dashmap::DashMap<(u64, B256), GetPayloadResponse>>,
 }
 
 impl<A: Api> ProposerApi<A> {
@@ -71,6 +77,7 @@ impl<A: Api> ProposerApi<A> {
             alert_manager: AlertManager::from_relay_config(&relay_config),
             auctioneer_handle,
             reg_handle,
+            delivered_payloads: Arc::new(dashmap::DashMap::new()),
         }
     }
 }

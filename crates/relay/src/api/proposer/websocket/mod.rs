@@ -3,7 +3,7 @@
 //! The WS connection is just a persistent pipe between commit-boost and
 //! Helix. REST flows unchanged alongside. No auth handshake.
 //! Validator registrations arrive as the specs-SSZ
-//! `SignedValidatorRegistrationV1` inside a `ValidatorRegistration` batch.
+//! `SignedValidatorRegistrationV1` inside a `SubscriptionBatch`.
 //! The relay verifies the BLS signature and WS-only timestamp freshness
 //! (±1 epoch), inserts accepted pubkeys into the `WsProposerRegistry`, and
 //! returns a single `RegistrationAck { accepted, rejected }`.
@@ -26,7 +26,7 @@ use axum::{
     response::IntoResponse,
 };
 use futures::StreamExt;
-use helix_common::utils::utcnow_sec;
+use helix_common::utils::{utcnow_ns, utcnow_sec};
 use helix_types::{BlsPublicKeyBytes, ForkName, SignedBlindedBeaconBlock, SignedBlindedBeaconBlockElectra, SignedBlindedBeaconBlockFulu, SignedBlindedBeaconBlockGloas};
 use parking_lot::Mutex;
 use serde::Deserialize;
@@ -105,7 +105,7 @@ async fn handle_connection<A: Api>(
     auction_conclusion_ms: Option<u64>,
 ) {
     let connection_id = registry.allocate_connection_id();
-    info!(connection_id, ?auction_conclusion_ms, "WS: new connection");
+    info!(connection_id, ?auction_conclusion_ms, now_ns = utcnow_ns(), "WS: new connection");
 
     // Outbound push channel for this connection. push::run sends
     // (fork_byte, ssz_bytes) payloads; the handler prepends the tag byte
@@ -157,7 +157,7 @@ async fn handle_connection<A: Api>(
                 let data = match msg {
                     Some(Ok(Message::Binary(d))) => d,
                     Some(Ok(Message::Close(_))) | None => {
-                        info!(connection_id, "WS: connection closed");
+                        info!(connection_id, now_ns = utcnow_ns(), "WS: connection closed");
                         break;
                     }
                     Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
@@ -171,13 +171,13 @@ async fn handle_connection<A: Api>(
                 let decoded = match framing::decode(&data) {
                     Ok(d) => d,
                     Err(e) => {
-                        warn!(connection_id, ?e, "WS: decode error — closing");
+                        warn!(connection_id, ?e, now_ns = utcnow_ns(), "WS: decode error — closing");
                         break;
                     }
                 };
 
                 match decoded {
-                    WsMessage::ValidatorRegistration(batch) => {
+                    WsMessage::Subscribe(batch) => {
                         let (accepted, rejected) = process_registration_batch(
                             &batch,
                             &registry,
@@ -195,6 +195,7 @@ async fn handle_connection<A: Api>(
                         }
                         info!(
                             connection_id,
+                            now_ns = utcnow_ns(),
                             total = batch.registrations.len(),
                             accepted,
                             rejected,
@@ -202,6 +203,13 @@ async fn handle_connection<A: Api>(
                         );
                     }
                     WsMessage::SubmitBlindedBlock { fork, body_ssz } => {
+                        // Settle: stop pushing bids for all registered pubkeys
+                        // — the proposer has already acted on the winning bid.
+                        for pubkey in &registered_pubkeys {
+                            for snap in registry.get_all_entries(pubkey) {
+                                snap.per_slot.lock().received_submission = true;
+                            }
+                        }
                         let status = route_submit_blinded_block(&api, fork, &body_ssz).await;
                         let ack = SubmitBlindedBlockAck { status: status as u8 };
                         let reply = framing::encode(&WsMessage::SubmitBlindedBlockAck(ack));
@@ -275,7 +283,7 @@ async fn handle_connection<A: Api>(
 // Registration processing
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Process a `ValidatorRegistration` batch. Per-entry: timestamp freshness
+/// Process a `Subscribe` batch. Per-entry: timestamp freshness
 /// + BLS signature verification. Accepted pubkeys are inserted into the
 /// registry under `connection_id`. Returns `(accepted, rejected)` counters.
 ///
@@ -283,7 +291,7 @@ async fn handle_connection<A: Api>(
 /// (D5).
 #[allow(clippy::too_many_arguments)]
 fn process_registration_batch(
-    batch: &ws_wire::messages::ValidatorRegistration,
+    batch: &ws_wire::messages::SubscriptionBatch,
     registry: &Arc<WsProposerRegistry>,
     header_tx: &mpsc::UnboundedSender<(u8, Vec<u8>)>,
     connection_id: u64,
@@ -337,6 +345,10 @@ fn process_registration_batch(
 /// Decode + route a `SubmitBlindedBlock` frame to `_get_payload(V2)`. Maps
 /// the `Result` to a `SubmitStatus` byte. Unknown/unsupported fork byte →
 /// `InternalError` without closing the connection (D3).
+/// Route a SubmitBlindedBlock from a WS client to the auctioneer.
+/// Returns SubmitStatus. Duplicate submissions are idempotent — if the
+/// auctioneer already has this payload, it returns Accepted without
+/// re-processing.
 async fn route_submit_blinded_block<A: Api>(
     api: &Arc<ProposerApi<A>>,
     fork_byte: u8,
@@ -384,11 +396,15 @@ async fn route_submit_blinded_block<A: Api>(
         .await
     {
         Ok(_) => SubmitStatus::Accepted,
+        // Already delivering = already accepted (redundant WS submit after REST).
+        Err(crate::api::proposer::error::ProposerApiError::DeliveringPayload) => {
+            SubmitStatus::Accepted
+        }
         Err(crate::api::proposer::error::ProposerApiError::ProposerNotRegistered) => {
             SubmitStatus::Rejected
         }
         Err(e) => {
-            warn!(?e, "WS submit: _get_payload returned error");
+            warn!(?e, now_ns = utcnow_ns(), "WS submit: _get_payload returned error");
             SubmitStatus::InternalError
         }
     }
